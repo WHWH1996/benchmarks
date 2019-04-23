@@ -14,11 +14,16 @@
 # ==============================================================================
 """Base model configuration for CNN benchmarks."""
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 from collections import namedtuple
 
 import tensorflow as tf
 
 import convnet_builder
+import mlperf
 
 # BuildNetworkResult encapsulate the result (e.g. logits) of a
 # Model.build_network() call.
@@ -73,10 +78,21 @@ class Model(object):
   def get_fp16_loss_scale(self):
     return self.fp16_loss_scale
 
-  def custom_l2_loss(self, fp32_params):
-    """Returns model specific L2 loss function; returns None to use default."""
-    del fp32_params
-    return None
+  def filter_l2_loss_vars(self, variables):
+    """Filters out variables that the L2 loss should not be computed for.
+
+    By default, this filters out batch normalization variables and keeps all
+    other variables. This behavior can be overridden by subclasses.
+
+    Args:
+      variables: A list of the trainable variables.
+
+    Returns:
+      A list of variables that the L2 loss should be computed for.
+    """
+    mlperf.logger.log(key=mlperf.tags.MODEL_EXCLUDE_BN_FROM_L2,
+                      value=True)
+    return [v for v in variables if 'batchnorm' not in v.name]
 
   def get_learning_rate(self, global_step, batch_size):
     del global_step
@@ -123,14 +139,17 @@ class Model(object):
     """
     raise NotImplementedError('Must be implemented in derived classes')
 
-  # TODO(laigd): have accuracy_function() take build_network_result instead.
-  def accuracy_function(self, inputs, logits):
+  def accuracy_function(self, inputs, build_network_result):
     """Returns the ops to measure the accuracy of the model."""
     raise NotImplementedError('Must be implemented in derived classes')
 
   def postprocess(self, results):
     """Postprocess results returned from model in Python."""
     return results
+
+  def reached_target(self):
+    """Define custom methods to stop training when model's target is reached."""
+    return False
 
 
 class CNNModel(Model):
@@ -267,6 +286,8 @@ class CNNModel(Model):
       logits = (
           network.affine(nclass, activation='linear')
           if not self.skip_final_affine_layer() else network.top_layer)
+      mlperf.logger.log(key=mlperf.tags.MODEL_HP_FINAL_SHAPE,
+                        value=logits.shape.as_list()[1:])
       aux_logits = None
       if network.aux_top_layer is not None:
         with network.switch_to_aux_top_layer():
@@ -288,6 +309,7 @@ class CNNModel(Model):
     # and once with the aux logits.
     aux_logits = build_network_result.extra_info
     with tf.name_scope('xentropy'):
+      mlperf.logger.log(key=mlperf.tags.MODEL_HP_LOSS_FN, value=mlperf.tags.CCE)
       cross_entropy = tf.losses.sparse_softmax_cross_entropy(
           logits=logits, labels=labels)
       loss = tf.reduce_mean(cross_entropy, name='xentropy_mean')
@@ -299,9 +321,10 @@ class CNNModel(Model):
         loss = tf.add_n([loss, aux_loss])
     return loss
 
-  def accuracy_function(self, inputs, logits):
+  def accuracy_function(self, inputs, build_network_result):
     """Returns the ops to measure the accuracy of the model."""
     _, labels = inputs
+    logits = build_network_result.logits
     top_1_op = tf.reduce_sum(
         tf.cast(tf.nn.in_top_k(logits, labels, 1), self.data_type))
     top_5_op = tf.reduce_sum(
