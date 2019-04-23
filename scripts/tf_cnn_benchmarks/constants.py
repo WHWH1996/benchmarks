@@ -1,5 +1,9 @@
 """Constants used in tf_cnn_benchmarks."""
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 from enum import Enum
 
 # Results fetched with this prefix will not be reduced. Instead, they will be
@@ -10,7 +14,7 @@ UNREDUCED_ACCURACY_OP_PREFIX = "tensor:"
 SIMPLE_VALUE_RESULT_PREFIX = "simple_value:"
 
 
-class BenchmarkMode(str, Enum):
+class BenchmarkMode(object):
   """Benchmark running mode."""
   TRAIN = "training"
   EVAL = "evaluation"
