@@ -14,8 +14,6 @@
 # ==============================================================================
 """Utilities for allreduce."""
 
-from __future__ import absolute_import
-from __future__ import division
 from __future__ import print_function
 
 import collections as pycoll
@@ -138,7 +136,8 @@ def parse_all_reduce_spec(all_reduce_spec):
         shards = 1
       if alg not in [
           'nccl', 'nccl/xring', 'nccl/rechd', 'nccl/pscpu', 'xring', 'pscpu',
-          'psgpu', 'pscpu/pscpu', 'collective'
+          'psgpu', 'pscpu/pscpu', '2d_torus', 'nccl/2d_torus',
+          'collective','2d_torus/2d_torus'
       ]:
         raise ValueError('all_reduce_spec (%s) contains invalid alg %s' %
                          (all_reduce_spec, alg))
@@ -361,6 +360,10 @@ def sum_grad_and_var_all_reduce(single_session,
       elif alg in ['pscpu', 'psgpu']:
         summed_grads = all_reduce.build_shuffle_all_reduce(
             scaled_grads, aux_devices, tf.add_n)
+      elif alg == '2d_torus':
+        summed_grads = all_reduce.build_2d_torus_all_reduce(scaled_grads)
+      elif alg == 'nccl/2d_torus':
+        summed_grads = all_reduce.build_nccl_then_torus(scaled_grads, tf.add)
       else:
         raise ValueError('unsupported all_reduce alg: ', alg)
 
